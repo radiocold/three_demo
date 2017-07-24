@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <style>
+         #txt_score {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            display:block;
+            color: aliceblue;
+            font-family: fantasy;
+            font-size: 30px;
+        }
+        
+        #over {
+            position: absolute;
+            display:none;
+            z-index: 100;
+            top: 50%;
+            left: 45%;
+            margin-right: -50%;
+        }
+    </style>
+</head>
+<body>
+    <div id="txt_score">SCORE 0</div>
+    
+     <div id="over">
+        <button id="close-image" onclick="onAgain();"><img src="video-replay.png"></button>
+    </div>
+    
+    <canvas id="webgl">
+        Your browser dont suppport
+    </canvas>
+
+    <script src="js/three.js"></script>
+
+    <!-- <script src="js/lib/DDSLoader.js"></script> -->
+    <script src="js/lib/MTLLoader.js"></script>
+    <script src="js/lib/OBJLoader.js"></script>
+
+    <script>
+        var container;
+        var camera;
+
+
+        var windowHalfX = window.innerWidth / 2;
+        var windowHalfY = window.innerHeight / 2;
+
+        var renderer;
+
+        var player;
+        var enemies = new Array();
+        var coins = new Array();
+        
+        var timeEnemyCreate = 0;
+        var timeCoinCreate = 0;
+
+        var canvas;
+        var raycaster = new THREE.Raycaster();
+        var keycodes = new Array();
+        var camMove = new THREE.Vector3();
+
+        var euler = new THREE.Euler(0 , 0, 0 , "ZYX");
+        var background;
+        
+        var clock = new THREE.Clock();
+        
+        var isEndLoad = false;
+        var isOver = false;
+        
+        var models = [
+            { path: "models/hari/" ,
+              obj:"haribonbon_body01a.obj" ,
+              mtl:"haribonbon_body01a.mtl",
+              name: "hari"
+            },
+            { path: "models/dee/" ,
+              obj:"Model.obj" ,
+              mtl:"Model.mtl",
+              name :"dee"
+            },
+            { path: "models/coin/" ,
+              obj:"Coin.obj" ,
+              mtl:"Coin.mtl",
+              name :"coin"
+            }
+        ];
+            
+        var meshes = new Array();
+
+        var currentModel = 0;
+        var score = 0;
+        
+        var audioCoin;
+        var audioPunch;
+        
+        init();
+        animate();
+
+        function onLoadNextModel() 
+        {
+            var onProgress = function ( xhr ) {
+                if ( xhr.lengthComputable ) {
+                    var percentComplete = xhr.loaded / xhr.total * 100;
+                    console.log( Math.round(percentComplete, 2) + '% downloaded' );
+                }
+            };
+            var onError = function ( xhr ) { console.warn("No loaded error"); };
+
+            var mtlLoader = new THREE.MTLLoader();
+            mtlLoader.setPath( models[currentModel].path );
+            mtlLoader.load( models[currentModel].mtl, function( materials ) {
+                materials.preload();
+                var objLoader = new THREE.OBJLoader();
+                objLoader.setMaterials( materials );
+                objLoader.setPath( models[currentModel].path );
+                objLoader.load(models[currentModel].obj, function ( object ) {
+                    object.traverse( function( node ) 
+                    {
+                          if( node.material ) {
+                            //  node.material.side = THREE.DoubleSide;
+                          }
+                    });
+
+                    meshes[models[currentModel].name] = object;
+                    currentModel++;
+
+                    if (currentModel < models.length) 
+                    {
+                        onLoadNextModel();
+                    } 
+                    else 
+                    {
+                        onEndAllLoad();
+                    }
+                }, onProgress, onError );
+            });
+        }
+        
+        function onAgain() 
+        {
+            isOver = false;
+            timeCoinCreate = 0;
+            timeEnemyCreate = 0;
+            
+            for (var i = enemies.length - 1 ; i >= 0; i--) 
+            {
+                scene.remove(enemies[i]);
+                enemies.splice(i , 1);
+            }
+            
+            for (var i = coins.length - 1 ; i >= 0; i--) 
+            {
+                scene.remove(coins[i]);
+                coins.splice(i , 1);
+            }
+            score = 0;
+            document.getElementById("over").style.display = "none";
+            document.getElementById("txt_score").innerHTML = "SCORE " + score;
+            
+            player.state = 0;
+            player.rotation.z = 0;
+        }
+            
+        function onEndAllLoad() 
+        {
+            console.log(meshes);
+
+            player =  meshes["dee"];
+            player.rotateX(-25 * Math.PI / 180);
+            player.state = 0;
+            scene.add(player);
+            
+            if (meshes["coin"]) {
+                meshes["coin"].rotateX(90 * Math.PI / 180);
+            }
+
+            isEndLoad = true;
+            console.log(isEndLoad);
+        }
+
+        function init() 
+        {
+            container = document.createElement( 'div' );
+            document.body.appendChild( container );
+
+            camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.1, 100 );
+            camera.position.z = 5;
+
+            scene = new THREE.Scene();
+
+            var ambient = new THREE.AmbientLight( 0xcccccc );
+            scene.add( ambient );
+
+            var directionalLight = new THREE.DirectionalLight( 0xffffff );
+            directionalLight.position.set( 0, 0,  1).normalize();
+
+            scene.add( directionalLight );
+
+            onLoadNextModel();
+
+            var textureloader = new THREE.TextureLoader();
+            textureloader.load('bg2.jpg' , function(texture)
+            {
+                var material = new THREE.MeshBasicMaterial({map: texture});
+                var geometry = new THREE.PlaneGeometry(texture.image.width / 100, texture.image.height/100);
+                background = new THREE.Mesh(geometry, material);
+                background.position.z = -50;
+                background.scale.set(20 , 20, 20);
+                scene.add(background);
+            });
+            
+           
+
+            canvas = document.getElementById("webgl");
+
+            renderer = new THREE.WebGLRenderer({canvas:canvas});
+
+            renderer.setPixelRatio( window.devicePixelRatio );
+            renderer.setSize( window.innerWidth, window.innerHeight );
+
+            container.appendChild( renderer.domElement );
+
+            document.addEventListener( 'mousemove', onMouseMove, false );
+
+            window.addEventListener("keydown" , onkeydown);
+            window.addEventListener("keyup" , onKeyUp); 
+            
+            var source;
+            
+            audioCoin = document.createElement('audio');
+            source = document.createElement('source');
+            source.src = 'coin.wav';
+            audioCoin.appendChild(source);
+            
+            audioPunch = document.createElement('audio');
+            source = document.createElement('source');
+            source.src = 'punch.wav';
+            audioPunch.appendChild(source);
+        }
+            
+		function onKeyUp(e) 
+		{
+			if (keycodes[e.keyCode]) 
+			{
+				delete keycodes[e.keyCode];
+			}
+		}
+
+		function onkeydown(e) 
+		{
+			keycodes[e.keyCode] = true;
+		}
+            
+        function onMouseMove(e) 
+        {
+            if (isOver) return;
+            
+            e.preventDefault();
+            var mouse = new THREE.Vector3();
+
+            if (event.x != undefined && event.y != undefined) 
+            {
+                mouse.x = event.x;
+                mouse.y = event.y;
+            }
+            else //Firefox method to get the position
+            {
+                mouse.x = event.clientX + document.body.scrollLeft + document.documentElement.scrollLeft;
+                mouse.y = event.clientY + document.body.scrollTop + document.documentElement.scrollTop;
+            }
+
+            mouse.x -= canvas.offsetLeft;
+            mouse.y -= canvas.offsetTop;
+
+            mouse.x = (2.0 *  mouse.x) / canvas.width - 1.0;
+            mouse.y = 1.0 - (2.0 *  mouse.y) / canvas.height;
+            mouse.z = 1.0;
+
+            mouse.unproject( camera );
+            mouse.sub(camera.position).normalize();
+
+            var ray = new THREE.Ray(camera.position ,  mouse);
+
+            var point = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0 , 0, 1) , 2));
+
+            if (point) 
+            {
+                if (player) 
+                {
+                    player.targetX = point.x;
+                    player.targetY = point.y;
+                    player.targetZ = point.z;
+                }
+            }
+        }
+            
+            
+        function animate() 
+        {
+            
+            var dt = clock.getDelta();
+            
+            updatePlayer(dt);
+            
+            if (isEndLoad && !isOver) 
+            {
+                timeEnemyCreate += dt;
+                if (timeEnemyCreate > 0.05) 
+                {
+                    var enemy = meshes["hari"].clone();
+                    enemy.position.set(-5 + Math.random() * 10 , -5 + Math.random() * 10 , -50);
+                    enemy.scale.set(0.1 ,0.1 , 0.1 );
+                    enemy.speed = 16 + Math.random() * 15;
+                    enemies.push(enemy);
+                    scene.add(enemy);
+                    timeEnemyCreate = 0;
+                }
+                
+                timeCoinCreate += dt;
+                if (timeCoinCreate > 1) 
+                {
+                    var coin = meshes["coin"].clone();
+                    coin.position.set(-5 + Math.random() * 10 , -5 + Math.random() * 10 , -50);
+                    coin.scale.set(0.07 ,0.07 , 0.07 );
+                    coin.speed = 15 + Math.random() * 20;
+                    coins.push(coin);
+                    scene.add(coin);
+                    timeCoinCreate = 0;
+                }
+
+                for (var i = enemies.length - 1 ; i >= 0; i--) 
+                {
+                    if (enemies[i].toRemove)  
+                    {
+                        scene.remove(enemies[i]);
+                        enemies.splice(i , 1);
+
+                    } 
+                    else 
+                    {
+                        enemies[i].position.z += enemies[i].speed * dt;
+                        enemies[i].rotateZ(2 * dt);
+
+                        if (enemies[i].position.z > 2) 
+                        {
+                            enemies[i].toRemove = true;
+                        }
+
+                        var dx = player.position.x - enemies[i].position.x;
+                        var dy = player.position.y + 0.5 - enemies[i].position.y;
+                        var dz = player.position.z - enemies[i].position.z;
+
+                        var d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                        if (d <= 1)
+                        {
+                            console.log("collision enemy");
+                            isOver = true;
+                            document.getElementById("over").style.display = "block";
+                            
+                            player.vy = 6;
+                            player.state = 1;
+                            
+                            if (audioPunch)
+                            {
+                                audioPunch.play();
+                            }
+                        }
+                    }
+
+                }
+                
+                for (var i = coins.length - 1 ; i >= 0; i--) 
+                {
+                    if (coins[i].toRemove)  
+                    {
+                        scene.remove(coins[i]);
+                        coins.splice(i , 1);
+
+                    } 
+                    else 
+                    {
+                        coins[i].position.z += coins[i].speed * dt;
+                        coins[i].rotateZ(5 * dt);
+
+                        if (coins[i].position.z > 5) 
+                        {
+                            coins[i].toRemove = true;
+                        }
+
+                        var dx = player.position.x - coins[i].position.x;
+                        var dy = player.position.y + 0.5 - coins[i].position.y;
+                        var dz = player.position.z - coins[i].position.z;
+
+                        var d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                        if (d < 1.5) 
+                        {
+                            coins[i].toRemove = true;
+                            console.log("collision coin");
+                            score++;
+                            document.getElementById("txt_score").innerHTML = "SCORE " + score;
+                            if (audioCoin) {
+                                audioCoin.play();
+                            }
+                        }
+                    }
+
+                    
+                }
+
+
+                if (background) 
+                {
+                    background.rotateZ(0.2 * dt);    
+                }
+
+              
+            }
+            
+            camMove.set(0 , 0, 0);
+
+            if (keycodes[65]) // A
+            {
+                camMove.x = -0.05;
+            }
+
+            if (keycodes[68]) // D
+            {
+                camMove.x = 0.05;
+            }
+
+            if (keycodes[87]) // W
+            {
+                camMove.z = -0.05;
+            }
+
+            if (keycodes[83]) // S
+            {
+                camMove.z = 0.05;
+            }	
+
+            // rotacion camera eje X
+            if (keycodes[73]) //
+            {
+                euler.x += 2.5 / 180 * Math.PI;
+            }
+
+            if (keycodes[75]) // 
+            {
+                euler.x -= 2.5 / 180 * Math.PI;
+            }	
+
+            if (keycodes[74]) //
+            {
+                euler.y += 2.5 / 180 * Math.PI;
+            }
+
+            if (keycodes[76]) // 
+            {
+                euler.y -= 2.5 / 180 * Math.PI;
+            }	
+
+            camera.setRotationFromEuler(euler);
+
+            if (camMove.x != 0)
+            {
+                var v_right = new THREE.Vector3(0 , 0 , 0);
+                v_right.setFromMatrixColumn(camera.matrix , 0);
+                v_right.multiplyScalar(camMove.x);
+
+                camera.position.add(v_right);
+            }
+
+            if (camMove.z != 0)
+            {
+                var v_forward = new THREE.Vector3(0 , 0 , 0);
+                v_forward.setFromMatrixColumn(camera.matrix , 2);
+                v_forward.multiplyScalar(camMove.z);
+
+                camera.position.add(v_forward);
+            }
+
+            
+            requestAnimationFrame( animate );
+            render();
+        }
+        
+        function updatePlayer(dt) 
+        {
+            if (!player) return;
+            
+            switch (player.state)  
+            {
+                case 0:
+                    if (player.targetX) 
+                    {
+                        player.position.x += (player.targetX -  player.position.x) * 10 * dt;
+                        player.position.y += (player.targetY -  player.position.y) * 10 * dt;
+                        player.position.z += (player.targetZ -  player.position.z) * 10 * dt; 
+                    }
+                    break;
+                case 1:
+                    player.vy -= 8 * dt;
+                    player.position.y += player.vy * dt;
+                    player.rotateZ(1 * dt);
+                    break;
+            }
+        }
+
+        function render()
+        {
+            // camera.lookAt( scene.position );
+            renderer.render( scene, camera );
+        }
+
+		</script>
+</body>
+</html>
+
+
